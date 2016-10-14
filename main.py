@@ -1,55 +1,72 @@
 import os
 import re
 import pdb
-import string
-from nltk import word_tokenize
-from nltk.stem.porter import PorterStemmer
-from nltk.corpus import stopwords
-
-import xml.etree.ElementTree as ET
-from logging import exception
-
-#tree = ElementTree()
+from collections import namedtuple
+from main_3 import my_text_rank, remove_stop_words
 
 
-# def parse_xml_file(filename):
-    # XML Parser not working, fix it
-    #parser = ET.XMLParser(encoding="utf-8")
-    # pdb.set_trace()
-    #
-    # print filename
-    # root = ET.parse(filename).getroot()
+def evaluate_summary(dataset, summary):
+    """ Compares how many word are common in Catch phrase bag of words and
+    summary text bag of words.
+    """
+    cp_bag_of_words = []
+    score_dict = dict()
+    for filepath, data in dataset.iteritems():
+        cps = data.cps
+        for cp in cps:
+            cp_bag_of_words += remove_stop_words(cp).split()
 
-def get_sentences(filename, regex):
-    sentences = []
-    with open(filename) as inFile:
-        data = inFile.read()
-        data = regex.split(data)  # .lower() Is it a good idea to convert to lower?
-        sentence = data[1].translate(None, string.punctuation)
-        #pdb.set_trace()
-    # return sentences, part before that, part before sentences
-    return sentence, data[0], data[2]
-
-def tokenize(sentence):
-    """ Create tokens and remove stop words"""
-    #pdb.set_trace()
-    stemmer = PorterStemmer()
-    tokens = word_tokenize(sentence)
-    tokens = [i for i in tokens if i not in string.punctuation]
-    tokens = [stemmer.stem(item) for item in tokens]
-    tokens = [w for w in tokens if not w in stopwords.words('english')]
-    return tokens
+        summary_bag_of_words = []
+        lines = summary[filepath]
+        for line in lines:
+            summary_bag_of_words += line.sentences.split()
+        s1 = set(cp_bag_of_words)
+        s2 = set(summary_bag_of_words)
+        common_words = s1.intersection(s2)
+        score = len(common_words)/((len(s1)+len(s2))/2.0)
+        score_dict[filepath] = score
+    return score_dict
 
 def parse_files(directory):
-    filenames = os.listdir(directory)
-    regex = re.compile(r'<sentences>([\s\S]*?)<\/sentences>')#, flags=re.DOTALL)
-    for filename in filenames:
-        sentences, pre_data, post_data = get_sentences(os.path.join(directory, filename), regex=regex)
-        tokens = tokenize(sentences)
-        pdb.set_trace()
-        print tokens
-        #sentences = parse_xml_file(os.path.join(directory, filename))
+    """ Parse the data hard way.
 
+    python xml parser was throwing an unformed xml exception.
+    So I had to do this. Sorry
+
+    And yes, all the files shall be loaded into memory. And all the files in the
+    directory have to be of exactly this format."""
+    filenames = os.listdir(directory)
+    regex_1 = re.compile(r'<name>([\s\S]*?)<\/name>')
+    regex_2 = re.compile(r'<AustLII>([\s\S]*?)<\/AustLII>')
+    regex_3 = re.compile(r'<catchphrases>([\s\S]*?)<\/catchphrases>')
+    regex_31 = re.compile(r'<catchphrase "id=c[0-9]+">([\s\S]*?)<\/catchphrase>')
+    regex_4 = re.compile(r'<sentences>([\s\S]*?)<\/sentences>')  # , flags=re.DOTALL)
+    data_tuple = namedtuple('data', 'name url cps text')
+    dataset = dict()
+    for filename in filenames:
+        file_path = os.path.join(directory, filename)
+        with open(file_path) as inFile:
+            data = inFile.read()
+            _, name, data = regex_1.split(data)
+            _, url, data = regex_2.split(data)
+            _, cps, data = regex_3.split(data)
+            cps = regex_31.split(cps)[1:len(cps):2]
+            _, sentences, _ = regex_4.split(data)
+            #pdb.set_trace()
+            key = '_'.join(os.path.realpath(file_path).split('\\'))
+            #key = '_'.join(file_path.split('\\'))
+            dataset[key] = data_tuple(name, url, cps, sentences)
+            #pdb.set_trace()
+    return dataset
 
 if __name__ == "__main__":
-    parse_files('trainingHalf')
+
+    dataset = parse_files(directory='trainingHalf')
+    summary = my_text_rank(dataset)
+    result = evaluate_summary(dataset, summary)
+    with open('result.txt', 'w') as out_file:
+        for file_path, data in dataset.iteritems():
+            score = result[file_path]
+            #pdb.set_trace()
+            res_str = data.name + '\n' + data.url + '\n' + str(score) +'\n\n\n'
+            out_file.write(res_str)
